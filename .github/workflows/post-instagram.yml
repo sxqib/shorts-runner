@@ -60,16 +60,21 @@ jobs:
         id: vids
         env:
           GH_TOKEN: ${{ github.token }}
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
         run: |
           pip install -q requests imageio-ffmpeg pillow
           # Tonight's videos: made for today's New York date, by a run that finished successfully
-          # (a cancelled or failed run can leave half a set behind).
+          # (a cancelled or failed run can leave half a set behind). Looks at this repo's runs first, then at
+          # the private repo's (videos made there before the move to the public runner).
           WANT=$(TZ=America/New_York date +%F)
           DAY=""
-          for RUN in $(gh run list -R "$GITHUB_REPOSITORY" --workflow daily-shorts.yml --status success --limit 8 --json databaseId -q '.[].databaseId'); do
-            gh run download -R "$GITHUB_REPOSITORY" "$RUN" --dir "artifact/$RUN" >/dev/null 2>&1 || continue   # check-only runs have no videos
-            F=$(ls -d "artifact/$RUN/$WANT" artifact/$RUN/*/"$WANT" 2>/dev/null | head -1)
-            if [ -n "$F" ]; then DAY="$F"; echo "Daily run: $RUN"; break; fi
+          for SRC in "$GITHUB_REPOSITORY" sxqib/shorts-factory; do
+            T="$GH_TOKEN"; [ "$SRC" = "$GITHUB_REPOSITORY" ] || T="${FACTORY_TOKEN:-$GH_TOKEN}"
+            for RUN in $(GH_TOKEN="$T" gh run list -R "$SRC" --workflow daily-shorts.yml --status success --limit 8 --json databaseId -q '.[].databaseId' 2>/dev/null); do
+              GH_TOKEN="$T" gh run download -R "$SRC" "$RUN" --dir "artifact/$RUN" >/dev/null 2>&1 || continue   # check-only runs have no videos
+              F=$(ls -d "artifact/$RUN/$WANT" artifact/$RUN/*/"$WANT" 2>/dev/null | head -1)
+              if [ -n "$F" ]; then DAY="$F"; echo "Daily run: $SRC $RUN"; break 2; fi
+            done
           done
           if [ -z "$DAY" ]; then
             echo "::warning::No videos made for $WANT; using the newest successful run (already-posted videos are skipped)"
