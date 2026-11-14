@@ -160,6 +160,7 @@ jobs:
           mkdir -p "$D"
           cp "out/case-video/$EP/case.mp4" "$D/case.mp4"
           cp "out/case-video/$EP/case.instagram.txt" "$D/case.instagram.txt"
+          cp "out/case-video/$EP/case.cover.jpg" "$D/case.cover.jpg" 2>/dev/null || true   # the Reel cover
           python ig_post.py --dir "$D"
           cp data/ig_posted.json /tmp/ig_posted.json
 

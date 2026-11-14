@@ -159,6 +159,7 @@ jobs:
           mkdir -p "$D"
           cp "out/milo-video/$EP/milo.mp4" "$D/milo.mp4"
           cp "out/milo-video/$EP/milo.instagram.txt" "$D/milo.instagram.txt"
+          cp "out/milo-video/$EP/milo.cover.jpg" "$D/milo.cover.jpg" 2>/dev/null || true   # the Reel cover
           python ig_post.py --dir "$D"
           cp data/ig_posted.json /tmp/ig_posted.json
 
