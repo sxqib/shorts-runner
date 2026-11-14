@@ -98,6 +98,17 @@ jobs:
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m story.engine:*)"
             --max-turns 80
 
+      # claude-code-action points git at the repo the workflow runs in (this public runner): point it back
+      - name: Point git back at the private repo
+        if: always()
+        env:
+          FT: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git remote set-url origin https://github.com/sxqib/shorts-factory
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$FT" | base64 -w0)"
+          git config --global --unset-all url.https://x-access-token@github.com/.insteadOf 2>/dev/null || true
+          git remote -v | sed 's/:[^@]*@/:***@/'
       - name: Validate (the renderer only runs on a valid episode)
         run: python -m story.engine validate "data/story/$EP.json"
 

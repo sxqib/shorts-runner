@@ -151,6 +151,17 @@ jobs:
       # ---- Hey Milo: Claude writes today's crazy-scenario episode (story/GUIDE.md), then it's checked and rendered
       # into today's folder, so Discord delivery and the 6 PM posting pick it up with the others.
       # Any failure here only skips Milo for the day.
+      # claude-code-action points git at the repo the workflow runs in (this public runner): point it back
+      - name: Point git back at the private repo
+        if: always()
+        env:
+          FT: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git remote set-url origin https://github.com/sxqib/shorts-factory
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$FT" | base64 -w0)"
+          git config --global --unset-all url.https://x-access-token@github.com/.insteadOf 2>/dev/null || true
+          git remote -v | sed 's/:[^@]*@/:***@/'
       - name: "Milo: today's episode id"
         id: milo
         run: echo "ep=$(python -c 'import daily; print(daily.post_date())')" >> "$GITHUB_OUTPUT"
@@ -199,6 +210,17 @@ jobs:
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m hf voice:*),Bash(python -m hf preview:*)"
             --max-turns 200
 
+      # claude-code-action points git at the repo the workflow runs in (this public runner): point it back
+      - name: Point git back at the private repo
+        if: always()
+        env:
+          FT: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git remote set-url origin https://github.com/sxqib/shorts-factory
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$FT" | base64 -w0)"
+          git config --global --unset-all url.https://x-access-token@github.com/.insteadOf 2>/dev/null || true
+          git remote -v | sed 's/:[^@]*@/:***@/'
       - name: "Milo: render"
         if: vars.MILO_ENGINE != 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         continue-on-error: true
@@ -241,6 +263,17 @@ jobs:
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m story.engine:*)"
             --max-turns 80
 
+      # claude-code-action points git at the repo the workflow runs in (this public runner): point it back
+      - name: Point git back at the private repo
+        if: always()
+        env:
+          FT: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git remote set-url origin https://github.com/sxqib/shorts-factory
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$FT" | base64 -w0)"
+          git config --global --unset-all url.https://x-access-token@github.com/.insteadOf 2>/dev/null || true
+          git remote -v | sed 's/:[^@]*@/:***@/'
       - name: "Milo (old renderer): check and render"
         if: vars.MILO_ENGINE == 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         continue-on-error: true
@@ -289,6 +322,17 @@ jobs:
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m hf.case search:*),Bash(python -m hf.case image:*),Bash(python -m hf.case voice:*),Bash(python -m hf.case preview:*)"
             --max-turns 200
 
+      # claude-code-action points git at the repo the workflow runs in (this public runner): point it back
+      - name: Point git back at the private repo
+        if: always()
+        env:
+          FT: ${{ secrets.FACTORY_TOKEN }}
+        run: |
+          git remote set-url origin https://github.com/sxqib/shorts-factory
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$FT" | base64 -w0)"
+          git config --global --unset-all url.https://x-access-token@github.com/.insteadOf 2>/dev/null || true
+          git remote -v | sed 's/:[^@]*@/:***@/'
       - name: "Case: render"
         if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'case')
         continue-on-error: true
