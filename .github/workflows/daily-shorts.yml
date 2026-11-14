@@ -113,15 +113,15 @@ jobs:
           key: kokoro-82m-v1
 
       # Ditch The Sub is paused (Nov 2026: weakest engagement). Add "stop" to the repository variable
-      # DAILY_CHANNELS (default "map,battle,case") to bring it back; discovery and research only run for it.
+      # DAILY_CHANNELS (default "map,battle,case,milo") to bring it back; discovery and research only run for it.
       - name: Discover trending GitHub alternatives
-        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'stop')
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'stop')
         run: python discover.py --want 3
 
       # Research every day so picks stay fresh (one app is posted per day, newest first, and unposted picks
       # expire after 10 days). Skipped only when 2 apps found in the last 2 days are already waiting.
       - name: Check research backlog
-        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'stop')
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'stop')
         id: backlog
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
@@ -177,7 +177,7 @@ jobs:
           echo "HYPERFRAMES_NO_TELEMETRY=1" >> "$GITHUB_ENV"
 
       - name: "Milo: write the episode (Claude Code, your Claude plan)"
-        if: vars.MILO_ENGINE != 'story'
+        if: vars.MILO_ENGINE != 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
@@ -192,6 +192,7 @@ jobs:
             and check it with `python -m hf preview ${{ steps.milo.outputs.ep }}` (look at EVERY contact sheet it prints, all scenes)
             until it has 0 errors and every line visibly happens on screen.
             Don't edit any other files. Don't render and don't commit.
+            ${{ fromJSON(vars.HINTS || '{}').milo && format('The owner asked for this episode: {0}', fromJSON(vars.HINTS || '{}').milo) || '' }}
           show_full_output: false
           claude_args: >-
             --model claude-opus-5-5
@@ -199,7 +200,7 @@ jobs:
             --max-turns 200
 
       - name: "Milo: render"
-        if: vars.MILO_ENGINE != 'story'
+        if: vars.MILO_ENGINE != 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         continue-on-error: true
         env:
           EP: ${{ steps.milo.outputs.ep }}
@@ -223,7 +224,7 @@ jobs:
           PY
 
       - name: "Milo (old renderer): write the episode"
-        if: vars.MILO_ENGINE == 'story'
+        if: vars.MILO_ENGINE == 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
@@ -241,7 +242,7 @@ jobs:
             --max-turns 80
 
       - name: "Milo (old renderer): check and render"
-        if: vars.MILO_ENGINE == 'story'
+        if: vars.MILO_ENGINE == 'story' && contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'milo')
         continue-on-error: true
         env:
           EP: ${{ steps.milo.outputs.ep }}
@@ -264,7 +265,7 @@ jobs:
       # folder so Discord delivery and the 6 PM posting pick it up. Any failure here only skips the case for the day.
       # Leave "case" out of the repository variable DAILY_CHANNELS to pause it.
       - name: "Case: write the episode (Claude Code, your Claude plan)"
-        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'case')
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'case')
         uses: anthropics/claude-code-action@v1
         continue-on-error: true
         with:
@@ -281,6 +282,7 @@ jobs:
             `python -m hf.case preview ${{ steps.milo.outputs.ep }}` (look at EVERY contact sheet it prints)
             until it has 0 errors and every shot looks right.
             Don't edit any other files. Don't render and don't commit.
+            ${{ fromJSON(vars.HINTS || '{}').case && format('The owner asked for this episode: {0}', fromJSON(vars.HINTS || '{}').case) || '' }}
           show_full_output: false
           claude_args: >-
             --model claude-opus-5-5
@@ -288,7 +290,7 @@ jobs:
             --max-turns 200
 
       - name: "Case: render"
-        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'case')
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'case')
         continue-on-error: true
         env:
           EP: ${{ steps.milo.outputs.ep }}
@@ -308,10 +310,18 @@ jobs:
           hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
           PY
 
+      # Notes from Studio (the dashboard) are for one daily run: clear them once the episodes are written.
+      - name: Clear the notes used today
+        if: vars.HINTS != '' && vars.HINTS != '{}'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+        run: gh variable set HINTS --repo "$GITHUB_REPOSITORY" --body '{}'
+
       - name: Render 3 Shorts and deliver to Discord
         env:
           CHANNEL_ENGINE: ${{ vars.CHANNEL_ENGINE || 'hf' }}
-        run: python daily.py --only "${{ vars.DAILY_CHANNELS || 'map,battle,case' }}"
+        run: python daily.py --only "${{ vars.DAILY_CHANNELS || 'map,battle,case,milo' }}"
 
       - name: Save queue and history
         if: always()
