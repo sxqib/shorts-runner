@@ -62,8 +62,7 @@ jobs:
         run: |
           printf '%s' "$SCRIPT" > /tmp/script.json
           python tools/voice_pack.py /tmp/script.json "out/voice/$NAME"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: voice-${{ inputs.name }}
-          path: out/voice/
-          retention-days: 7
+      - name: Keep the voice pack privately for 7 days
+        env:
+          VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
+        run: python tools/vault.py put "voice-${{ inputs.name }}" out/voice/

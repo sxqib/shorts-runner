@@ -187,12 +187,8 @@ jobs:
             sleep 5
           done
 
-      - name: Keep the video for 7 days
+      - name: Keep the video privately for 7 days
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: case-${{ inputs.episode }}
-          path: |
-            out/case-video/
-            out/case/${{ inputs.episode }}/snap/
-          retention-days: 7
+        env:
+          VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
+        run: python tools/vault.py put "case-${{ inputs.episode }}" out/case-video/ out/case/${{ inputs.episode }}/snap/

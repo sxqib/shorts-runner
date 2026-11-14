@@ -185,12 +185,8 @@ jobs:
             sleep 5
           done
 
-      - name: Keep the video for 7 days
+      - name: Keep the video privately for 7 days
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: story-${{ inputs.episode }}
-          path: |
-            out/story/
-            out/story_preview/
-          retention-days: 7
+        env:
+          VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
+        run: python tools/vault.py put "story-${{ inputs.episode }}" out/story/ out/story_preview/

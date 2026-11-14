@@ -328,10 +328,10 @@ jobs:
             for i in 1 2 3; do git pull --rebase -X theirs origin main && git push && break; sleep 5; done
           fi
 
-      - name: Keep videos for 7 days (backup)
+      # Kept as a draft release of the PRIVATE repo (not as a run artifact, which is public in the runner)
+      - name: Keep the videos privately for 7 days
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: shorts-${{ github.run_number }}
-          path: out/
-          retention-days: 7
+        env:
+          VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
+          EP: ${{ steps.milo.outputs.ep }}
+        run: '[ -n "$EP" ] || exit 0; python tools/vault.py put "daily-$EP" "out/$EP" "out/milo/$EP/snap" "out/case/$EP/snap"'

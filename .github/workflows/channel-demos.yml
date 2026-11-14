@@ -96,10 +96,8 @@ jobs:
       run: "python - <<'PY'\nimport os\nfrom pathlib import Path\nfrom deliver import post, fit_for_discord\nurl = os.environ.get(\"DISCORD_WEBHOOK\"\
         )\nfor f in sorted(Path(\"out/channel-demos\").glob(\"*.mp4\")):\n    if url:\n        post(url, f\"## HyperFrames demo: {f.stem}\", file=fit_for_discord(f))\n\
         PY\n"
-    - name: Keep the demos
+    - name: Keep the demos privately for 7 days
       if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: channel-demos
-        path: out/channel-demos/
-        retention-days: 7
+      env:
+        VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
+      run: python tools/vault.py put channel-demos out/channel-demos/

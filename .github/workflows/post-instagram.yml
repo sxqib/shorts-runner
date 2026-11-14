@@ -22,7 +22,7 @@ on:
 
 permissions:
   contents: write   # save data/ig_posted.json
-  actions: read     # download the videos from the daily run
+  actions: read     # download videos from older daily runs (new ones are kept privately: tools/vault.py)
 
 concurrency:
   group: post-instagram
@@ -61,6 +61,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
         run: |
           pip install -q requests imageio-ffmpeg pillow
           # Tonight's videos: made for today's New York date, by a run that finished successfully
@@ -68,7 +69,10 @@ jobs:
           # the private repo's (videos made there before the move to the public runner).
           WANT=$(TZ=America/New_York date +%F)
           DAY=""
-          for SRC in "$GITHUB_REPOSITORY" sxqib/shorts-factory; do
+          # 1. the day's set kept privately by the daily run (tools/vault.py)
+          if python tools/vault.py get "daily-$WANT" vault; then DAY="vault/out/$WANT"; fi
+          # 2. older runs kept their videos as run artifacts
+          [ -n "$DAY" ] || for SRC in "$GITHUB_REPOSITORY" sxqib/shorts-factory; do
             T="$GH_TOKEN"; [ "$SRC" = "$GITHUB_REPOSITORY" ] || T="${FACTORY_TOKEN:-$GH_TOKEN}"
             for RUN in $(GH_TOKEN="$T" gh run list -R "$SRC" --workflow daily-shorts.yml --status success --limit 8 --json databaseId -q '.[].databaseId' 2>/dev/null); do
               GH_TOKEN="$T" gh run download -R "$SRC" "$RUN" --dir "artifact/$RUN" >/dev/null 2>&1 || continue   # check-only runs have no videos
@@ -76,6 +80,10 @@ jobs:
               if [ -n "$F" ]; then DAY="$F"; echo "Daily run: $SRC $RUN"; break 2; fi
             done
           done
+          if [ -z "$DAY" ] && python tools/vault.py latest daily- "$WANT" vault; then
+            echo "::warning::No videos made for $WANT; using the newest kept set (already-posted videos are skipped)"
+            DAY=$(ls -d vault/out/20??-??-?? | sort | tail -1)
+          fi
           if [ -z "$DAY" ]; then
             echo "::warning::No videos made for $WANT; using the newest successful run (already-posted videos are skipped)"
             DAY=$(ls -d artifact/*/20??-??-?? artifact/*/*/20??-??-?? 2>/dev/null | awk -F/ '{print $NF" "$0}' | sort | tail -1 | cut -d' ' -f2)
