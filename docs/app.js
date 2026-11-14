@@ -273,12 +273,12 @@ const findVideo = (sets, names, re) => {
 };
 function pill(status) {
   const map = { posted: ["ok", "Posted"], ready: ["warn", "Ready"], made: ["ok", "Made"], making: ["run", "Making…"],
-    failed: ["bad", "Failed"], paused: ["", "Paused"], none: ["", "No video"], running: ["run", "Running"], queued: ["run", "Queued"],
+    failed: ["bad", "Failed"], paused: ["", "Paused"], none: ["", "No video"], running: ["run", "Running"], queued: ["run", "Queued"], waiting: ["", "Waiting"],
     success: ["ok", "Done"], failure: ["bad", "Failed"], cancelled: ["", "Cancelled"], skipped: ["", "Skipped"] };
   const [c, t] = map[status] || ["", status];
   return `<span class="pill ${c}">${t}</span>`;
 }
-const runStatus = (r) => (r.status === "completed" ? r.conclusion : r.status === "in_progress" ? "running" : "queued");
+const runStatus = (r) => (r.status === "completed" ? r.conclusion : r.status === "in_progress" ? "running" : ["pending", "waiting"].includes(r.status) ? "waiting" : "queued");
 const runName = (r) => WF_NAMES[wfFile(r)] || r.name;
 function runInputsLabel(r) {
   const t = r.display_title || "";
@@ -363,7 +363,7 @@ async function runCard(r, fresh) {
   return `<div class="card stack">
     <div class="row"><div class="grow"><h3>${esc(runName(r))}</h3><span class="kv">${esc(runInputsLabel(r))} started ${ago(r.run_started_at || r.created_at)} · ${dur(r.run_started_at || r.created_at)}</span></div>${pill(runStatus(r))}</div>
     <div class="bar"><i style="width:${pct}%"></i></div>
-    <div class="row"><span class="kv grow ellipsis">${now ? esc(now.name) : r.status === "queued" ? "Waiting for a runner…" : "Starting…"}</span>
+    <div class="row"><span class="kv grow ellipsis">${now ? esc(now.name) : ["pending", "waiting"].includes(r.status) ? "Waiting for the run before it to finish" : r.status === "queued" ? "Waiting for a runner…" : "Starting…"}</span>
       <a class="btn small" href="${r.html_url}" target="_blank" rel="noopener">Log ${ICON.ext}</a>
       <button class="btn small danger" data-cancel="${r.id}">Stop</button></div></div>`;
 }
