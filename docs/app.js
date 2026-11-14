@@ -171,7 +171,7 @@ async function showGate(msg = "") {
   $("#in-pw").autocomplete = setup ? "new-password" : "current-password";
   $("#gate-btn").textContent = setup ? "Encrypt and save" : "Unlock";
   $("#gate-help").innerHTML = setup
-    ? "Use a fine-grained token for <b>shorts-factory</b> and <b>shorts-runner</b> with Actions, Contents and Variables: Read and write. Choose a password of at least 14 characters (four random words work well): the encrypted token is stored in this public page, so a short password could be guessed."
+    ? "Use a fine-grained token for <b>shorts-factory</b> and <b>shorts-runner</b> with Actions, Contents and Variables: Read and write. A long password is safest (four random words work well): the encrypted token is stored in this public page, so a short one could be guessed."
     : "Forgot it? Delete <code>docs/auth.json</code> in shorts-runner and set up again.";
   $("#gate-err").textContent = msg;
   $("#in-pw").focus();
@@ -183,7 +183,7 @@ async function showGate(msg = "") {
       if (setup) {
         const tok = $("#in-token").value.trim();
         if (!tok) throw new Error("Paste your GitHub token.");
-        if (pw.length < 14) throw new Error("Use at least 14 characters (four random words work well).");
+        if (!pw) throw new Error("Choose a password.");
         if (pw !== $("#in-pw2").value) throw new Error("The passwords don't match.");
         btn.textContent = "Checking token…"; TOKEN = tok;
         await gh(`/repos/${FACTORY}`); await gh(`/repos/${RUNNER}`);
@@ -529,13 +529,13 @@ async function viewChannels(fresh) {
   }));
   $("#pw-lock").onclick = () => lock("Locked.");
   $("#pw-change").onclick = () => {
-    openSheet(`<h2>Change password</h2><p class="muted" style="margin:6px 0 16px">At least 14 characters. Other devices will need the new password.</p>
+    openSheet(`<h2>Change password</h2><p class="muted" style="margin:6px 0 16px">Other devices will need the new password. Longer is safer.</p>
       <label class="field"><span>New password</span><input type="password" id="np1" autocomplete="new-password"></label>
       <label class="field"><span>Repeat</span><input type="password" id="np2" autocomplete="new-password"></label>
       <button class="btn primary" id="np-go">Save</button><p class="err" id="np-err"></p>`);
     $("#np-go").onclick = async () => {
       const a = $("#np1").value, b = $("#np2").value;
-      if (a.length < 14) return ($("#np-err").textContent = "Use at least 14 characters.");
+      if (!a) return ($("#np-err").textContent = "Choose a password.");
       if (a !== b) return ($("#np-err").textContent = "They don't match.");
       $("#np-go").disabled = true; $("#np-go").textContent = "Encrypting…";
       try {
