@@ -214,3 +214,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .hint-box { flex: 0 0 100%; padding-left: 52px; }
 @media (max-width: 760px) { .hint-box { padding-left: 0; } }
 .note svg, .kv svg, .meta svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* nothing may push the page wider than the screen: grid and flex children shrink, long text wraps or ellipsizes */
+.view > *, .section > *, .stack > *, .card > *, .hero > *, .grid > *, .list > *, .main { min-width: 0; }
+.main { overflow-x: clip; }
+.card, .kv, .meta, .title, h1, h2, h3, p { overflow-wrap: anywhere; }
