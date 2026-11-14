@@ -376,8 +376,28 @@ function bindCommon() {
 }
 
 /* ------------------------------------------------------------------ video player (kept videos are private) */
+async function coverFor(assetId) {   // the Reel cover kept next to a video (<name>.cover.jpg)
+  try {
+    for (const s of await vault()) {
+      const a = (s.assets || []).find((x) => x.id == assetId);
+      if (a) return s.assets.find((x) => x.name === a.name.replace(/\.mp4$/, ".cover.jpg")) || null;
+    }
+  } catch { /* no cover */ }
+  return null;
+}
+async function showCover(assetId) {
+  const c = await coverFor(assetId);
+  if (!c) return;
+  const r = await fetch(`${API}/repos/${FACTORY}/releases/assets/${c.id}`, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/octet-stream" } });
+  if (!r.ok) return;
+  const url = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: "image/jpeg" }));
+  const wrap = $("#sheet-body .video-wrap");
+  if (wrap) wrap.insertAdjacentHTML("afterend", `<div class="cover-row"><img src="${url}" alt="Reel cover" /><div><b>Reel cover</b>
+    <div class="muted">Uploaded with the post, and shown on the profile grid.</div></div></div>`);
+}
 async function playVideo(assetId, title = "Video", extra = "") {
   openSheet(`<h2>${esc(title)}</h2>${extra}<div class="video-wrap" style="margin-top:14px"><p class="muted" id="vp-msg">Loading the video…</p></div>`);
+  showCover(assetId).catch(() => {});
   try {
     const r = await fetch(`${API}/repos/${FACTORY}/releases/assets/${assetId}`, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/octet-stream" } });
     if (!r.ok) throw new Error(r.status);
