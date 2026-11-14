@@ -1,0 +1,337 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+name: Daily Shorts
+
+on:
+  # Main trigger: cron-job.org starts this at 09:15 Karachi through the API (see WORKFLOWS.md, Scheduling).
+  # GitHub's own schedule is best-effort (often hours late), so it's kept only as a safety net.
+  # Every automatic start skips itself once today's videos exist.
+  schedule:
+    - cron: "45 14 * * *"   # safety net: 7:45 PM Karachi / 9:45 AM New York (winter)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Make videos even if today's are already made"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write          # save queue/history back to the repo
+  id-token: write          # used by the Claude Code action to authenticate
+
+concurrency:
+  group: daily-shorts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.c.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+      - id: c
+        run: |
+          # the date of the 6 PM New York post these videos are for (same rule as daily.py's post_date)
+          if [ "$(TZ=America/New_York date +%-H)" -ge 18 ]; then TODAY=$(TZ=America/New_York date -d tomorrow +%F);
+          else TODAY=$(TZ=America/New_York date +%F); fi
+          LAST=$(python3 -c "import json; print(json.load(open('data/state.json')).get('last_run', ''))")
+          echo "today=$TODAY last_run=$LAST"
+          if [ "${{ inputs.force }}" = "true" ] || [ "$LAST" != "$TODAY" ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "Today's videos are already made: nothing to do."
+          fi
+
+  make-shorts:
+    needs: check
+    if: needs.check.outputs.go == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TZ: Asia/Karachi
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}       # discovery: 1,000+ API req/h + exact 7-day star counts
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }} # delivery to your phone
+      IG_AUTOPOST: ${{ secrets.IG_TOKEN_STOP != '' || secrets.IG_TOKEN_MAP != '' || secrets.IG_TOKEN_BATTLE != '' || secrets.IG_TOKEN_MILO != '' || secrets.IG_TOKEN_CRIME != '' }}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.12"
+
+      - name: Install system packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng libcairo2-dev pkg-config ffmpeg
+
+      # Installed packages are cached (about 1 GB with CPU torch), so most days skip the ~70 s install.
+      # The key changes when requirements.txt or the Python version changes, which rebuilds it once.
+      - name: Cache Python packages
+        id: venv
+        uses: actions/cache@v4
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.txt') }}-v1
+
+      - name: Install Python packages (skipped when the cached ones work)
+        run: |
+          if [ -x ~/venv/bin/python ] && ~/venv/bin/python -c "import torch, kokoro, playwright, cv2, edge_tts, cairo" 2>/dev/null; then
+            echo "Using cached packages"
+          else
+            echo "Installing packages"
+            rm -rf ~/venv
+            python -m venv ~/venv
+            ~/venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+            ~/venv/bin/pip install -q -r requirements.txt
+          fi
+
+      - name: Use the cached packages
+        run: |
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+          echo "KOKORO_PYTHON=$HOME/venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Cache browser for screenshots
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-v1
+
+      - name: Install browser (downloads only when not cached)
+        run: python -m playwright install --with-deps chromium
+
+      - name: Cache Kokoro voice model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kokoro-82m-v1
+
+      # Ditch The Sub is paused (Nov 2026: weakest engagement). Add "stop" to the repository variable
+      # DAILY_CHANNELS (default "map,battle,case") to bring it back; discovery and research only run for it.
+      - name: Discover trending GitHub alternatives
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'stop')
+        run: python discover.py --want 3
+
+      # Research every day so picks stay fresh (one app is posted per day, newest first, and unposted picks
+      # expire after 10 days). Skipped only when 2 apps found in the last 2 days are already waiting.
+      - name: Check research backlog
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'stop')
+        id: backlog
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import datetime as dt, json, sys
+          q = json.load(open("data/queue.json"))
+          posted = set(json.load(open("data/posted.json")))
+          since = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+          fresh = sum(e.get("status") == "approved" and e.get("repo") not in posted and e.get("found", "") >= since
+                      for e in q)
+          need = fresh < 2
+          print(f"need={'1' if need else '0'}")
+          print(f"{fresh} fresh approved apps (found since {since}) -> research: {need}", file=sys.stderr)
+          PY
+
+      - name: Research candidates (Claude Code, your Claude plan)
+        if: steps.backlog.outputs.need == '1'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true    # if research fails, daily.py falls back to the curated list
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}   # use the workflow token, no Claude GitHub App needed
+          prompt: "Read .github/research_prompt.md and follow it exactly."
+          claude_args: >-
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
+            --max-turns 60
+
+      # ---- Hey Milo: Claude writes today's crazy-scenario episode (story/GUIDE.md), then it's checked and rendered
+      # into today's folder, so Discord delivery and the 6 PM posting pick it up with the others.
+      # Any failure here only skips Milo for the day.
+      - name: "Milo: today's episode id"
+        id: milo
+        run: echo "ep=$(python -c 'import daily; print(daily.post_date())')" >> "$GITHUB_OUTPUT"
+
+      # Every channel renders with HyperFrames (hf/): the three data channels through fixed templates
+      # (hf/channels/), Hey Milo as a page Claude writes (hf/GUIDE.md). Repository variables switch back:
+      # CHANNEL_ENGINE=legacy (the three data channels), MILO_ENGINE=story (Hey Milo).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache HyperFrames
+        uses: actions/cache@v4
+        with:
+          path: hf/node_modules
+          key: hyperframes-${{ runner.os }}-${{ hashFiles('hf/package-lock.json') }}-v3
+
+      - name: Install HyperFrames
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+        run: |
+          [ -x hf/node_modules/.bin/hyperframes ] || (cd hf && npm ci --no-audit --no-fund)
+          echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+          echo "HYPERFRAMES_NO_TELEMETRY=1" >> "$GITHUB_ENV"
+
+      - name: "Milo: write the episode (Claude Code, your Claude plan)"
+        if: vars.MILO_ENGINE != 'story'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read hf/GUIDE.md and follow it exactly. Today's date is the date of the run.
+            This run is unattended and one-shot: run every command in the foreground and wait for it (never in the
+            background, never end your turn to wait), or the episode is lost.
+            The episode id is ${{ steps.milo.outputs.ep }}: write data/milo/${{ steps.milo.outputs.ep }}/episode.json,
+            run `python -m hf voice ${{ steps.milo.outputs.ep }}`, write data/milo/${{ steps.milo.outputs.ep }}/index.html,
+            and check it with `python -m hf preview ${{ steps.milo.outputs.ep }}` (look at EVERY contact sheet it prints, all scenes)
+            until it has 0 errors and every line visibly happens on screen.
+            Don't edit any other files. Don't render and don't commit.
+          show_full_output: false
+          claude_args: >-
+            --model claude-opus-5-5
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m hf voice:*),Bash(python -m hf preview:*)"
+            --max-turns 200
+
+      - name: "Milo: render"
+        if: vars.MILO_ENGINE != 'story'
+        continue-on-error: true
+        env:
+          EP: ${{ steps.milo.outputs.ep }}
+        run: |
+          if [ -f "data/milo/$EP/episode.json" ] && [ ! -f "data/milo/$EP/timing.js" ]; then
+            echo "::warning::The episode has a script but no voice: running the voice step here to show why"
+            python -m hf voice "$EP"
+          fi
+          if [ ! -f "data/milo/$EP/index.html" ]; then echo "::error::No Milo page was written today"; exit 1; fi
+          python -m hf build "$EP" "out/$EP/milo.mp4"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/milo/{ep}/episode.json").read_text(encoding="utf-8"))["meta"]
+          hp = Path("data/story/history.json")
+          hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
+          if not any(h.get("episode") == ep for h in hist):
+              hist.append({"date": m.get("date", ep), "episode": ep, "topic": m["topic"], "title": m["title"], "engine": "hyperframes"})
+          hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+
+      - name: "Milo (old renderer): write the episode"
+        if: vars.MILO_ENGINE == 'story'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read story/GUIDE.md and follow it exactly. Today's date is the date of the run.
+            Write the episode to data/story/${{ steps.milo.outputs.ep }}.json (use that path wherever the guide says
+            data/story/<date>.json). Validate with `python -m story.engine validate data/story/${{ steps.milo.outputs.ep }}.json`
+            and preview with `python -m story.engine preview data/story/${{ steps.milo.outputs.ep }}.json`; look at
+            out/story_preview/sheet.png (and props.png if you drew custom props) and fix what looks wrong.
+            Don't edit any other files except story/custom_props.json and story/custom_poses.json. Don't commit.
+          claude_args: >-
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m story.engine:*)"
+            --max-turns 80
+
+      - name: "Milo (old renderer): check and render"
+        if: vars.MILO_ENGINE == 'story'
+        continue-on-error: true
+        env:
+          EP: ${{ steps.milo.outputs.ep }}
+        run: |
+          python -m story.engine validate "data/story/$EP.json"
+          python -m story.engine render "data/story/$EP.json" "out/$EP/milo.mp4"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/story/{ep}.json").read_text(encoding="utf-8"))["meta"]
+          hp = Path("data/story/history.json")
+          hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
+          if not any(h.get("episode") == ep for h in hist):
+              hist.append({"date": m.get("date", ep), "episode": ep, "topic": m["topic"], "title": m["title"]})
+          hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+
+      # ---- Case Unsealed: Claude researches today's case and builds it (hf/case/GUIDE.md), rendered into today's
+      # folder so Discord delivery and the 6 PM posting pick it up. Any failure here only skips the case for the day.
+      # Leave "case" out of the repository variable DAILY_CHANNELS to pause it.
+      - name: "Case: write the episode (Claude Code, your Claude plan)"
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'case')
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read hf/case/GUIDE.md and follow it exactly. Today's date is the date of the run.
+            This run is unattended and one-shot: run every command in the foreground and wait for it (never in the
+            background, never end your turn to wait), or the episode is lost.
+            The episode id is ${{ steps.milo.outputs.ep }}: research and pick today's case, write
+            data/case/${{ steps.milo.outputs.ep }}/episode.json, run `python -m hf.case voice ${{ steps.milo.outputs.ep }}`,
+            get pictures with `python -m hf.case search` / `python -m hf.case image ${{ steps.milo.outputs.ep }} ...`,
+            write data/case/${{ steps.milo.outputs.ep }}/index.html and check it with
+            `python -m hf.case preview ${{ steps.milo.outputs.ep }}` (look at EVERY contact sheet it prints)
+            until it has 0 errors and every shot looks right.
+            Don't edit any other files. Don't render and don't commit.
+          show_full_output: false
+          claude_args: >-
+            --model claude-opus-5-5
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m hf.case search:*),Bash(python -m hf.case image:*),Bash(python -m hf.case voice:*),Bash(python -m hf.case preview:*)"
+            --max-turns 200
+
+      - name: "Case: render"
+        if: contains(vars.DAILY_CHANNELS || 'map,battle,case', 'case')
+        continue-on-error: true
+        env:
+          EP: ${{ steps.milo.outputs.ep }}
+        run: |
+          if [ ! -f "data/case/$EP/index.html" ]; then echo "::error::No Case Unsealed page was written today"; exit 1; fi
+          [ -f "data/case/$EP/timing.js" ] || python -m hf.case voice "$EP"
+          python -m hf.case build "$EP" "out/$EP/case.mp4"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/case/{ep}/episode.json").read_text(encoding="utf-8"))["meta"]
+          hp = Path("data/case/history.json")
+          hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
+          if not any(h.get("episode") == ep for h in hist):
+              hist.append({"date": ep, "episode": ep, "case": m["case"], "kind": m["kind"], "title": m["title"]})
+          hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+          PY
+
+      - name: Render 3 Shorts and deliver to Discord
+        env:
+          CHANNEL_ENGINE: ${{ vars.CHANNEL_ENGINE || 'hf' }}
+        run: python daily.py --only "${{ vars.DAILY_CHANNELS || 'map,battle,case' }}"
+
+      - name: Save queue and history
+        if: always()
+        run: |
+          git config user.name "shorts-bot"
+          git config user.email "shorts-bot@users.noreply.github.com"
+          for f in data/queue.json data/posted.json data/stars_history.json data/state.json data/research_todo.json; do
+            [ -f "$f" ] && git add "$f"
+          done
+          git add data/story/ data/milo/ data/case/ story/custom_props.json story/custom_poses.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Daily run $(date +%F): update queue and history"
+            # main may have moved during the run (e.g. a code change) - rebase our data commit onto it
+            for i in 1 2 3; do git pull --rebase -X theirs origin main && git push && break; sleep 5; done
+          fi
+
+      - name: Keep videos for 7 days (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shorts-${{ github.run_number }}
+          path: out/
+          retention-days: 7

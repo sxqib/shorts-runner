@@ -1,0 +1,105 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+# Renders one demo of each data channel with the HyperFrames templates (real voice, live data). Posts nothing
+# and leaves the queues alone.
+name: Channel demos (HyperFrames)
+'on':
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  demos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TZ: Asia/Karachi
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      CHANNEL_ENGINE: hf
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: sxqib/shorts-factory
+        token: ${{ secrets.FACTORY_TOKEN }}
+    - uses: actions/setup-python@v5
+      id: py
+      with:
+        python-version: '3.12'
+    - name: Install system packages
+      run: sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng libcairo2-dev pkg-config ffmpeg
+    - name: Cache Python packages
+      id: venv
+      uses: actions/cache@v4
+      with:
+        path: ~/venv
+        key: venv-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.txt') }}-v1
+    - name: Install Python packages (skipped when the cached ones work)
+      run: "if [ -x ~/venv/bin/python ] && ~/venv/bin/python -c \"import torch, kokoro, playwright, cv2, edge_tts, cairo\" 2>/dev/null;\
+        \ then\n  echo \"Using cached packages\"\nelse\n  echo \"Installing packages\"\n  rm -rf ~/venv\n  python -m venv ~/venv\n  ~/venv/bin/pip\
+        \ install -q torch --index-url https://download.pytorch.org/whl/cpu\n  ~/venv/bin/pip install -q -r requirements.txt\nfi\n"
+    - name: Use the cached packages
+      run: 'echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+
+        echo "KOKORO_PYTHON=$HOME/venv/bin/python" >> "$GITHUB_ENV"
+
+        '
+    - name: Cache browser for screenshots
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}-v1
+    - name: Install browser (downloads only when not cached)
+      run: python -m playwright install --with-deps chromium
+    - name: Cache Kokoro voice model
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/huggingface
+        key: kokoro-82m-v1
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Cache HyperFrames and its voice/transcription models
+      uses: actions/cache@v4
+      with:
+        path: 'hf/node_modules
+
+          ~/.cache/hyperframes/tts
+
+          ~/.cache/hyperframes/whisper/models
+
+          '
+        key: hyperframes-${{ runner.os }}-${{ hashFiles('hf/package-lock.json') }}-v2
+    - name: Install HyperFrames
+      env:
+        PUPPETEER_SKIP_DOWNLOAD: '1'
+      run: '[ -x hf/node_modules/.bin/hyperframes ] || (cd hf && npm ci --no-audit --no-fund)
+
+        echo "HYPERFRAMES_PYTHON=$HOME/venv/bin/python" >> "$GITHUB_ENV"
+
+        echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+
+        echo "HYPERFRAMES_NO_TELEMETRY=1" >> "$GITHUB_ENV"
+
+        '
+    - name: Ditch The Sub demo
+      continue-on-error: true
+      run: python stop_paying.py --index 0 --day 1 --out out/channel-demos/stop_paying.mp4
+    - name: Atlas Drop demo
+      continue-on-error: true
+      run: python map_half.py --metric pop --out out/channel-demos/map_pop.mp4
+    - name: The Flag Ring demo
+      continue-on-error: true
+      run: python country_battle.py --theme europe --day 1 --out out/channel-demos/country_battle.mp4
+    - name: Send to Discord
+      if: always()
+      run: "python - <<'PY'\nimport os\nfrom pathlib import Path\nfrom deliver import post, fit_for_discord\nurl = os.environ.get(\"DISCORD_WEBHOOK\"\
+        )\nfor f in sorted(Path(\"out/channel-demos\").glob(\"*.mp4\")):\n    if url:\n        post(url, f\"## HyperFrames demo: {f.stem}\", file=fit_for_discord(f))\n\
+        PY\n"
+    - name: Keep the demos
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: channel-demos
+        path: out/channel-demos/
+        retention-days: 7

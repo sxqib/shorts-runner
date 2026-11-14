@@ -1,0 +1,110 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+name: Post to Instagram
+
+on:
+  # Main trigger: cron-job.org starts this at 6 PM New York through the API (see WORKFLOWS.md, Scheduling).
+  # GitHub's own schedule is best-effort, so it's kept only as a last safety net
+  # (02:07 UTC = 9:07 PM New York in winter, 10:07 PM in summer).
+  # Every start posts only videos that aren't posted yet (data/ig_posted.json).
+  schedule:
+    - cron: "7 2 * * *"     # safety net
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: check tokens and files, post nothing"
+        type: boolean
+        default: true
+      report:
+        description: "Also send the weekly report now"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # save data/ig_posted.json
+  actions: read     # download the videos from the daily run
+
+concurrency:
+  group: post-instagram
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Time check (from 6 PM New York until midnight)
+        id: when
+        run: |
+          H=$(TZ=America/New_York date +%-H)
+          echo "New York time: $(TZ=America/New_York date '+%F %H:%M')"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$H" -ge 18 ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "Before 6 PM in New York: nothing to do."
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+        if: steps.when.outputs.go == '1'
+
+      - uses: actions/setup-python@v5
+        if: steps.when.outputs.go == '1'
+        with:
+          python-version: "3.12"
+
+      - name: Get the latest videos
+        if: steps.when.outputs.go == '1'
+        id: vids
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install -q requests imageio-ffmpeg pillow
+          # Tonight's videos: made for today's New York date, by a run that finished successfully
+          # (a cancelled or failed run can leave half a set behind).
+          WANT=$(TZ=America/New_York date +%F)
+          DAY=""
+          for RUN in $(gh run list -R "$GITHUB_REPOSITORY" --workflow daily-shorts.yml --status success --limit 8 --json databaseId -q '.[].databaseId'); do
+            gh run download -R "$GITHUB_REPOSITORY" "$RUN" --dir "artifact/$RUN" >/dev/null 2>&1 || continue   # check-only runs have no videos
+            F=$(ls -d "artifact/$RUN/$WANT" artifact/$RUN/*/"$WANT" 2>/dev/null | head -1)
+            if [ -n "$F" ]; then DAY="$F"; echo "Daily run: $RUN"; break; fi
+          done
+          if [ -z "$DAY" ]; then
+            echo "::warning::No videos made for $WANT; using the newest successful run (already-posted videos are skipped)"
+            DAY=$(ls -d artifact/*/20??-??-?? artifact/*/*/20??-??-?? 2>/dev/null | awk -F/ '{print $NF" "$0}' | sort | tail -1 | cut -d' ' -f2)
+          fi
+          [ -n "$DAY" ] || { echo "No videos found"; exit 1; }
+          echo "Videos: $DAY"; ls "$DAY"
+          echo "day=$DAY" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Reels
+        if: steps.when.outputs.go == '1'
+        env:
+          IG_TOKEN_STOP: ${{ secrets.IG_TOKEN_STOP }}
+          IG_TOKEN_MAP: ${{ secrets.IG_TOKEN_MAP }}
+          IG_TOKEN_BATTLE: ${{ secrets.IG_TOKEN_BATTLE }}
+          IG_TOKEN_MILO: ${{ secrets.IG_TOKEN_MILO }}
+          IG_TOKEN_CRIME: ${{ secrets.IG_TOKEN_CRIME }}
+          GH_SECRETS_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}   # optional: saves refreshed tokens
+          IG_TOKEN_STOP_ID: ${{ secrets.IG_TOKEN_STOP_ID }}       # optional account IDs, only if lookup fails
+          IG_TOKEN_MAP_ID: ${{ secrets.IG_TOKEN_MAP_ID }}
+          IG_TOKEN_BATTLE_ID: ${{ secrets.IG_TOKEN_BATTLE_ID }}
+          IG_TOKEN_MILO_ID: ${{ secrets.IG_TOKEN_MILO_ID }}
+          IG_TOKEN_CRIME_ID: ${{ secrets.IG_TOKEN_CRIME_ID }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python ig_post.py --dir "${{ steps.vids.outputs.day }}" ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.report && '--report' || '' }}
+
+      - name: Save what was posted
+        if: always() && steps.when.outputs.go == '1'
+        run: |
+          git config user.name "shorts-bot"
+          git config user.email "shorts-bot@users.noreply.github.com"
+          # posts made, comment requests (requests.txt may be deleted when none are left) and report history
+          for f in data/ig_posted.json data/ig_requests.json data/ig_stats.json data/requests.txt; do
+            if [ -e "$f" ] || git ls-files --error-unmatch "$f" >/dev/null 2>&1; then git add -A -- "$f"; fi
+          done
+          git diff --cached --quiet && exit 0
+          git commit -m "Instagram: record posts and viewer requests"
+          for i in 1 2 3; do git pull --rebase -X theirs origin main && git push && break; sleep 5; done

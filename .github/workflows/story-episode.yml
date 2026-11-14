@@ -1,0 +1,196 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+name: Story episode (Milo)
+
+# Manual runs (demos and one-off episodes). Claude picks a crazy scenario, writes the episode by story/GUIDE.md,
+# validates and previews it; the renderer turns it into a video, which is sent to Discord. With "post" ticked,
+# it is also posted to @heymilotv right away (Reel + Story teaser). The daily episode runs in daily-shorts.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "Episode id (file name in data/story/)"
+        required: true
+        default: "demo"
+      hint:
+        description: "Optional extra instruction for the topic (e.g. 'not gaming')"
+        required: false
+        default: ""
+      render_only:
+        description: "Only re-render the existing episode file (no new writing)"
+        type: boolean
+        default: false
+      post:
+        description: "Post it to @heymilotv now (Reel + Story)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write    # save the episode and data/story/history.json
+  id-token: write    # Claude Code action
+
+concurrency:
+  group: story-episode
+  cancel-in-progress: false
+
+jobs:
+  episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      EP: ${{ inputs.episode }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.12"
+
+      - name: Install system packages
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng libcairo2-dev pkg-config
+
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        with:
+          path: ~/venv
+          key: venv-story-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.txt') }}-v1
+
+      - name: Install Python packages (skipped when the cached ones work)
+        run: |
+          if [ -x ~/venv/bin/python ] && ~/venv/bin/python -c "import torch, kokoro, cairo, cv2" 2>/dev/null; then
+            echo "Using cached packages"
+          else
+            rm -rf ~/venv && python -m venv ~/venv
+            ~/venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+            ~/venv/bin/pip install -q -r requirements.txt pycairo
+          fi
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+          echo "KOKORO_PYTHON=$HOME/venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Cache Kokoro voice model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kokoro-82m-v1
+
+      - name: Write the episode (Claude Code, your Claude plan)
+        if: ${{ !inputs.render_only }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read story/GUIDE.md and follow it exactly. Today's date is the date of the run.
+            Write the episode to data/story/${{ inputs.episode }}.json (use that path wherever the guide says
+            data/story/<date>.json). Validate with `python -m story.engine validate data/story/${{ inputs.episode }}.json`
+            and preview with `python -m story.engine preview data/story/${{ inputs.episode }}.json`; look at
+            out/story_preview/sheet.png (and props.png if you drew custom props) and fix what looks wrong.
+            Don't edit any other files except story/custom_props.json and story/custom_poses.json. The workflow records the topic in
+            data/story/history.json for you. Don't commit.
+            ${{ inputs.hint }}
+          claude_args: >-
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m story.engine:*)"
+            --max-turns 80
+
+      - name: Validate (the renderer only runs on a valid episode)
+        run: python -m story.engine validate "data/story/$EP.json"
+
+      - name: Render
+        run: python -m story.engine render "data/story/$EP.json" "out/story/$EP.mp4"
+
+      - name: Send to Discord
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from deliver import post, fit_for_discord
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/story/{ep}.json").read_text(encoding="utf-8"))["meta"]
+          url = os.environ.get("DISCORD_WEBHOOK")
+          if url:
+              post(url, f"## 🎬 Milo demo: {m['title']}\n-# topic: {m['topic']}", file=fit_for_discord(Path(f"out/story/{ep}.mp4")))
+              post(url, f"{m['ig_caption']}\n\n{m['question']}\n\n" + " ".join("#" + h for h in m.get("hashtags", [])))
+              post(url, "-# sources: " + " ".join(f"<{u}>" for u in m["sources"]))
+          PY
+
+      - name: Post to @heymilotv
+        if: inputs.post
+        env:
+          IG_TOKEN_MILO: ${{ secrets.IG_TOKEN_MILO }}
+          IG_TOKEN_MILO_ID: ${{ secrets.IG_TOKEN_MILO_ID }}
+        run: |
+          # ig_post.py posts every connected channel's video found in a folder; only Milo's token is given here
+          D="out/post/$(TZ=America/New_York date +%F)"
+          mkdir -p "$D"
+          cp "out/story/$EP.mp4" "$D/milo.mp4"
+          cp "out/story/$EP.instagram.txt" "$D/milo.instagram.txt"
+          python ig_post.py --dir "$D"
+          cp data/ig_posted.json /tmp/ig_posted.json
+
+      - name: Save the episode (and record the topic)
+        if: always()
+        run: |
+          [ -f "data/story/$EP.json" ] || exit 0
+          # keep this run's episode and new custom props aside, then start from the latest main, so runs that
+          # finish close together never overwrite each other's history or props
+          mkdir -p /tmp/keep && cp "data/story/$EP.json" /tmp/keep/ep.json
+          [ -f story/custom_props.json ] && cp story/custom_props.json /tmp/keep/props.json || echo '{}' > /tmp/keep/props.json
+          [ -f story/custom_poses.json ] && cp story/custom_poses.json /tmp/keep/poses.json || echo '{}' > /tmp/keep/poses.json
+          [ -f /tmp/ig_posted.json ] && cp /tmp/ig_posted.json /tmp/keep/ig_posted.json || true
+          git config user.name "shorts-bot"
+          git config user.email "shorts-bot@users.noreply.github.com"
+          for i in 1 2 3; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            cp /tmp/keep/ep.json "data/story/$EP.json"
+            python - <<'PY'
+          import datetime as dt, json, os
+          from pathlib import Path
+          ep = json.loads(Path("/tmp/keep/ep.json").read_text(encoding="utf-8"))
+          m = ep["meta"]
+          hp = Path("data/story/history.json")
+          hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
+          if not any(h.get("episode") == os.environ["EP"] for h in hist):
+              hist.append({"date": m.get("date") or dt.date.today().isoformat(), "episode": os.environ["EP"],
+                           "topic": m["topic"], "title": m["title"]})
+          hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+          lp = Path("story/custom_props.json")
+          lib = json.loads(lp.read_text(encoding="utf-8")) if lp.exists() else {}
+          new = json.loads(Path("/tmp/keep/props.json").read_text(encoding="utf-8"))
+          lib.update({k: v for k, v in new.items() if k not in lib})   # add new props, never overwrite
+          lp.write_text(json.dumps(lib, indent=1) + "\n", encoding="utf-8")
+          pp = Path("story/custom_poses.json")
+          plib = json.loads(pp.read_text(encoding="utf-8")) if pp.exists() else {}
+          pnew = json.loads(Path("/tmp/keep/poses.json").read_text(encoding="utf-8"))
+          plib.update({k: v for k, v in pnew.items() if k not in plib})
+          pp.write_text(json.dumps(plib, indent=1) + "\n", encoding="utf-8")
+          kp = Path("/tmp/keep/ig_posted.json")   # record a post made by this run (merged into the latest file)
+          if kp.exists():
+              mine = json.loads(kp.read_text(encoding="utf-8"))
+              ip = Path("data/ig_posted.json")
+              cur = json.loads(ip.read_text(encoding="utf-8")) if ip.exists() else {}
+              for day, entries in mine.items():
+                  for k, v in entries.items():
+                      cur.setdefault(day, {}).setdefault(k, v)
+              ip.write_text(json.dumps(cur, indent=2) + "\n", encoding="utf-8")
+          PY
+            git add data/story/ story/custom_props.json story/custom_poses.json data/ig_posted.json
+            git diff --cached --quiet && break
+            git commit -q -m "Story episode $EP" && git push -q && break
+            sleep 5
+          done
+
+      - name: Keep the video for 7 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-${{ inputs.episode }}
+          path: |
+            out/story/
+            out/story_preview/
+          retention-days: 7

@@ -1,0 +1,31 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+name: Audio API test (search only)
+
+# Lists which trending music / sounds the Instagram Audio API offers each account. Posts nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q requests
+      - name: Search audio
+        env:
+          IG_TOKEN_STOP: ${{ secrets.IG_TOKEN_STOP }}
+          IG_TOKEN_MAP: ${{ secrets.IG_TOKEN_MAP }}
+          IG_TOKEN_BATTLE: ${{ secrets.IG_TOKEN_BATTLE }}
+          IG_TOKEN_MILO: ${{ secrets.IG_TOKEN_MILO }}
+        run: python tools/audio_probe.py

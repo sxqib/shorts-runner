@@ -1,0 +1,197 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+name: Milo episode (HyperFrames)
+
+# Manual runs: a one-off or demo Hey Milo episode made in HyperFrames (hf/GUIDE.md). The video is sent to Discord;
+# with "post" ticked it is also posted to @heymilotv right away. The daily episode runs in daily-shorts.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      episode:
+        description: "Episode id (folder name in data/milo/)"
+        required: true
+        default: "demo"
+      hint:
+        description: "Optional extra instruction for the scenario"
+        required: false
+        default: ""
+      render_only:
+        description: "Only re-render an existing episode (no new writing)"
+        type: boolean
+        default: false
+      post:
+        description: "Post it to @heymilotv now (Reel + Story)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write    # save the episode and data/story/history.json
+  id-token: write    # Claude Code action
+
+concurrency:
+  group: milo-episode
+  cancel-in-progress: false
+
+jobs:
+  episode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EP: ${{ inputs.episode }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      PUPPETEER_SKIP_DOWNLOAD: "1"
+      HYPERFRAMES_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install system packages (the voice needs espeak-ng; HyperFrames needs ffmpeg)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng libcairo2-dev pkg-config ffmpeg
+
+      # The same cached packages as the daily run (same key), so the voice (Kokoro) is installed once for both.
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        with:
+          path: ~/venv
+          key: venv-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.txt') }}-v1
+
+      - name: Install Python packages (skipped when the cached ones work)
+        run: |
+          if ! ([ -x ~/venv/bin/python ] && ~/venv/bin/python -c "import torch, kokoro, playwright, cv2, edge_tts, cairo" 2>/dev/null); then
+            rm -rf ~/venv && python -m venv ~/venv
+            ~/venv/bin/pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+            ~/venv/bin/pip install -q -r requirements.txt
+          fi
+          echo "$HOME/venv/bin" >> "$GITHUB_PATH"
+          echo "KOKORO_PYTHON=$HOME/venv/bin/python" >> "$GITHUB_ENV"
+          echo "PUPPETEER_EXECUTABLE_PATH=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+
+      - name: Cache Kokoro voice model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kokoro-82m-v1
+
+      - name: Cache HyperFrames
+        uses: actions/cache@v4
+        with:
+          path: hf/node_modules
+          key: hyperframes-${{ runner.os }}-${{ hashFiles('hf/package-lock.json') }}-v3
+
+      - name: Install HyperFrames
+        run: '[ -x hf/node_modules/.bin/hyperframes ] || (cd hf && npm ci --no-audit --no-fund)'
+
+      - name: Write the episode (Claude Code, your Claude plan)
+        if: ${{ !inputs.render_only }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read hf/GUIDE.md and follow it exactly. Today's date is the date of the run.
+            This run is unattended and one-shot: run every command in the foreground and wait for it (never in the
+            background, never end your turn to wait), or the episode is lost.
+            The episode id is ${{ inputs.episode }}: write data/milo/${{ inputs.episode }}/episode.json,
+            run `python -m hf voice ${{ inputs.episode }}`, write data/milo/${{ inputs.episode }}/index.html,
+            and check it with `python -m hf preview ${{ inputs.episode }}` (look at EVERY contact sheet it prints, all scenes)
+            until it has 0 errors and every line visibly happens on screen.
+            Don't edit any other files. Don't render and don't commit.
+            ${{ inputs.hint }}
+          show_full_output: false
+          claude_args: >-
+            --model claude-opus-5-5
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(python -m hf voice:*),Bash(python -m hf preview:*)"
+            --max-turns 200
+
+      - name: Voice (re-render of an episode that has none here yet)
+        if: ${{ inputs.render_only }}
+        run: '[ -f "out/milo/$EP/mix.wav" ] || python -m hf voice "$EP"'
+
+      - name: Render
+        run: python -m hf build "$EP" "out/milo-video/$EP/milo.mp4"
+
+      - name: Send to Discord
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from deliver import post, fit_for_discord
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/milo/{ep}/episode.json").read_text(encoding="utf-8"))["meta"]
+          url = os.environ.get("DISCORD_WEBHOOK")
+          if url:
+              post(url, f"## 🎬 Milo (HyperFrames): {m['title']}\n-# {m['premise']}", file=fit_for_discord(Path(f"out/milo-video/{ep}/milo.mp4")))
+              post(url, f"{m['ig_caption']}\n\n{m['question']}\n\n" + " ".join("#" + h for h in m.get("hashtags", [])))
+          PY
+
+      - name: Post to @heymilotv
+        if: inputs.post
+        env:
+          IG_TOKEN_MILO: ${{ secrets.IG_TOKEN_MILO }}
+          IG_TOKEN_MILO_ID: ${{ secrets.IG_TOKEN_MILO_ID }}
+        run: |
+          D="out/post/$(TZ=America/New_York date +%F)"
+          mkdir -p "$D"
+          cp "out/milo-video/$EP/milo.mp4" "$D/milo.mp4"
+          cp "out/milo-video/$EP/milo.instagram.txt" "$D/milo.instagram.txt"
+          python ig_post.py --dir "$D"
+          cp data/ig_posted.json /tmp/ig_posted.json
+
+      - name: Save the episode (and record it)
+        if: always()
+        run: |
+          [ -f "data/milo/$EP/episode.json" ] || exit 0
+          mkdir -p /tmp/keep && cp -r "data/milo/$EP" /tmp/keep/ep
+          [ -f /tmp/ig_posted.json ] && cp /tmp/ig_posted.json /tmp/keep/ig_posted.json || true
+          git config user.name "shorts-bot"
+          git config user.email "shorts-bot@users.noreply.github.com"
+          for i in 1 2 3; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            mkdir -p "data/milo/$EP" && cp -r /tmp/keep/ep/. "data/milo/$EP/"
+            python - <<'PY'
+          import datetime as dt, json, os
+          from pathlib import Path
+          ep = os.environ["EP"]
+          m = json.loads(Path(f"data/milo/{ep}/episode.json").read_text(encoding="utf-8"))["meta"]
+          hp = Path("data/story/history.json")
+          hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
+          if not any(h.get("episode") == ep for h in hist):
+              hist.append({"date": m.get("date") or dt.date.today().isoformat(), "episode": ep, "topic": m["topic"],
+                           "title": m["title"], "engine": "hyperframes"})
+          hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+          kp = Path("/tmp/keep/ig_posted.json")
+          if kp.exists():
+              mine = json.loads(kp.read_text(encoding="utf-8"))
+              ip = Path("data/ig_posted.json")
+              cur = json.loads(ip.read_text(encoding="utf-8")) if ip.exists() else {}
+              for day, entries in mine.items():
+                  for k, v in entries.items():
+                      cur.setdefault(day, {}).setdefault(k, v)
+              ip.write_text(json.dumps(cur, indent=2) + "\n", encoding="utf-8")
+          PY
+            git add "data/milo/$EP" data/story/history.json data/ig_posted.json
+            git diff --cached --quiet && break
+            git commit -q -m "Milo episode $EP (HyperFrames)" && git push -q && break
+            sleep 5
+          done
+
+      - name: Keep the video for 7 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: milo-${{ inputs.episode }}
+          path: |
+            out/milo-video/
+            out/milo/${{ inputs.episode }}/snap/
+          retention-days: 7
