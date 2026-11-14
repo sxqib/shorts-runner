@@ -89,9 +89,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
     padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); border-right: 0; border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); }
   .brand, .nav-foot { display: none; }
-  .nav a { flex-direction: column; gap: 2px; font-size: 11px; padding: 6px 8px; flex: 1; align-items: center; }
+  .nav a { flex-direction: column; gap: 3px; font-size: 12px; padding: 8px 6px 6px; flex: 1; align-items: center; }
+  .nav a svg { width: 26px; height: 26px; stroke-width: 1.9; }
+  .icon-btn { width: 44px; height: 44px; }
+  .icon-btn svg { width: 22px; height: 22px; }
+  .btn { height: 44px; }
+  .btn.small { height: 38px; font-size: 14px; }
+  .btn svg { width: 19px; height: 19px; }
   .nav a.on { background: none; }
-  .main { padding: calc(18px + env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom)); }
+  .main { padding: calc(18px + env(safe-area-inset-top)) 16px calc(104px + env(safe-area-inset-bottom)); }
   h1 { font-size: 23px; }
 }
 
