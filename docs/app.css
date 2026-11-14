@@ -15,7 +15,8 @@
   }
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); color: var(--text); }
+html, body { margin: 0; background: var(--bg); color: var(--text); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { touch-action: manipulation; overscroll-behavior-y: none; }   /* no double-tap zoom, no rubber-band under the bar */
 body { font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased; }
 h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
@@ -50,7 +51,7 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 @keyframes spin { to { transform: rotate(360deg); } }
 .field { display: grid; gap: 6px; margin-bottom: 14px; }
 .field > span { font-size: 13px; font-weight: 600; color: var(--muted); }
-input[type=text], input[type=password], textarea, select { width: 100%; font: inherit; color: var(--text); background: var(--surface);
+input[type=text], input[type=password], textarea, select { width: 100%; font: inherit; font-size: 16px; /* iOS zooms into anything smaller */ color: var(--text); background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
 textarea { min-height: 84px; resize: vertical; }
 input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
