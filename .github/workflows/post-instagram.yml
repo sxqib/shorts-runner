@@ -63,7 +63,7 @@ jobs:
           FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
           VAULT_TOKEN: ${{ secrets.FACTORY_TOKEN || github.token }}
         run: |
-          pip install -q requests imageio-ffmpeg pillow
+          pip install -q requests imageio-ffmpeg pillow numpy
           # Tonight's videos: made for today's New York date, by a run that finished successfully
           # (a cancelled or failed run can leave half a set behind). Looks at this repo's runs first, then at
           # the private repo's (videos made there before the move to the public runner).
