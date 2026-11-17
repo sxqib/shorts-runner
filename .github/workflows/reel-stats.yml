@@ -1,0 +1,35 @@
+# GENERATED from sxqib/shorts-factory (.github/workflows) by tools/sync_runner.py. Do not edit here.
+# The code lives in the private repo; this public repo only runs it.
+# Every Reel of the last 30 days on all channels, best first (likes, comments, and views when the Meta app
+# has the insights permission). Prints the list and sends it to Discord. Manual only.
+name: Reel stats
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: sxqib/shorts-factory
+          token: ${{ secrets.FACTORY_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: List every Reel
+        env:
+          IG_TOKEN_STOP: ${{ secrets.IG_TOKEN_STOP }}
+          IG_TOKEN_MAP: ${{ secrets.IG_TOKEN_MAP }}
+          IG_TOKEN_BATTLE: ${{ secrets.IG_TOKEN_BATTLE }}
+          IG_TOKEN_MILO: ${{ secrets.IG_TOKEN_MILO }}
+          IG_TOKEN_CRIME: ${{ secrets.IG_TOKEN_CRIME }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          pip install -q requests imageio-ffmpeg pillow numpy
+          python ig_engage.py reels
