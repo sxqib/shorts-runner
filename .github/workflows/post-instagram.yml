@@ -31,7 +31,7 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Time check (from 6 PM New York until midnight)
         id: when
@@ -107,7 +107,7 @@ jobs:
           IG_TOKEN_MILO_ID: ${{ secrets.IG_TOKEN_MILO_ID }}
           IG_TOKEN_CRIME_ID: ${{ secrets.IG_TOKEN_CRIME_ID }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python ig_post.py --one-per-day --dir "${{ steps.vids.outputs.day }}" ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.report && '--report' || '' }}
+        run: python ig_post.py --one-per-day --spread --dir "${{ steps.vids.outputs.day }}" ${{ inputs.dry_run && '--dry-run' || '' }} ${{ inputs.report && '--report' || '' }}
 
       - name: Save what was posted
         if: always() && steps.when.outputs.go == '1'

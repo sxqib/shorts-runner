@@ -20,7 +20,7 @@ on:
         type: boolean
         default: false
       post:
-        description: "Post it to @heymilotv now (Reel + Story)"
+        description: "Post it to @heymilotv now (Reel)"
         type: boolean
         default: false
 

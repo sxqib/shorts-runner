@@ -4,7 +4,7 @@ name: Story episode (Milo)
 
 # Manual runs (demos and one-off episodes). Claude picks a crazy scenario, writes the episode by story/GUIDE.md,
 # validates and previews it; the renderer turns it into a video, which is sent to Discord. With "post" ticked,
-# it is also posted to @heymilotv right away (Reel + Story teaser). The daily episode runs in daily-shorts.yml.
+# it is also posted to @heymilotv right away (Reel). The daily episode runs in daily-shorts.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       post:
-        description: "Post it to @heymilotv now (Reel + Story)"
+        description: "Post it to @heymilotv now (Reel)"
         type: boolean
         default: false
 
