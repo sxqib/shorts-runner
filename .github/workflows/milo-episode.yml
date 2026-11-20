@@ -181,9 +181,9 @@ jobs:
           m = json.loads(Path(f"data/milo/{ep}/episode.json").read_text(encoding="utf-8"))["meta"]
           hp = Path("data/story/history.json")
           hist = json.loads(hp.read_text(encoding="utf-8")) if hp.exists() else []
-          if not any(h.get("episode") == ep for h in hist):
-              hist.append({"date": m.get("date") or dt.date.today().isoformat(), "episode": ep, "topic": m["topic"],
-                           "title": m["title"], "engine": "hyperframes"})
+          hist = [h for h in hist if h.get("episode") != ep]   # a remade episode replaces its old entry
+          hist.append({"date": m.get("date") or dt.date.today().isoformat(), "episode": ep, "topic": m["topic"],
+                       "title": m["title"], "engine": "hyperframes"})
           hp.write_text(json.dumps(hist, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
           kp = Path("/tmp/keep/ig_posted.json")
           if kp.exists():
