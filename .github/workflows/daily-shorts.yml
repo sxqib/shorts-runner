@@ -118,22 +118,26 @@ jobs:
         if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'stop')
         run: python discover.py --want 3
 
-      # Research every day so picks stay fresh (one app is posted per day, newest first, and unposted picks
-      # expire after 10 days). Skipped only when 2 apps found in the last 2 days are already waiting.
+      # Research every day so picks stay fresh (one video a day, newest first; unposted picks expire after 10 days).
+      # Today's format (daily.stop_kind: GitHub "find" on Tue/Thu/Sat, "alternative" otherwise) decides what to
+      # research; skipped when a fresh approved entry of that format is already waiting.
       - name: Check research backlog
         if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'stop')
         id: backlog
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import datetime as dt, json, sys
+          import daily
+          kind = daily.stop_kind()   # "find" on Tue/Thu/Sat post dates, "alternative" on the other days
           q = json.load(open("data/queue.json"))
           posted = set(json.load(open("data/posted.json")))
           since = (dt.date.today() - dt.timedelta(days=1)).isoformat()
           fresh = sum(e.get("status") == "approved" and e.get("repo") not in posted and e.get("found", "") >= since
-                      for e in q)
-          need = fresh < 2
+                      and e.get("kind", "alternative") == kind for e in q)
+          need = fresh < 1
           print(f"need={'1' if need else '0'}")
-          print(f"{fresh} fresh approved apps (found since {since}) -> research: {need}", file=sys.stderr)
+          print(f"kind={kind}")
+          print(f"today's format: {kind}; {fresh} fresh approved (found since {since}) -> research: {need}", file=sys.stderr)
           PY
 
       - name: Research candidates (Claude Code, your Claude plan)
@@ -143,7 +147,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}   # use the workflow token, no Claude GitHub App needed
-          prompt: "Read .github/research_prompt.md and follow it exactly."
+          prompt: "Read .github/research_prompt.md and follow it exactly. Today's kind: ${{ steps.backlog.outputs.kind }}."
           claude_args: >-
             --model claude-opus-5-5
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
