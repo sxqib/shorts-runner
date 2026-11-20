@@ -112,8 +112,8 @@ jobs:
           path: ~/.cache/huggingface
           key: kokoro-82m-v1
 
-      # Ditch The Sub is paused (Nov 2026: weakest engagement). Add "stop" to the repository variable
-      # DAILY_CHANNELS (default "map,battle,case,milo") to bring it back; discovery and research only run for it.
+      # Ditch The Sub runs when "stop" is in the repository variable DAILY_CHANNELS (default "map,battle,case,milo";
+      # Studio's Channels page switches it). Discovery and research only run for it.
       - name: Discover trending GitHub alternatives
         if: contains(vars.DAILY_CHANNELS || 'map,battle,case,milo', 'stop')
         run: python discover.py --want 3
@@ -145,8 +145,9 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}   # use the workflow token, no Claude GitHub App needed
           prompt: "Read .github/research_prompt.md and follow it exactly."
           claude_args: >-
+            --model claude-opus-5-5
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
-            --max-turns 60
+            --max-turns 80
 
       # ---- Hey Milo: Claude writes today's crazy-scenario episode (story/GUIDE.md), then it's checked and rendered
       # into today's folder, so Discord delivery and the 6 PM posting pick it up with the others.
